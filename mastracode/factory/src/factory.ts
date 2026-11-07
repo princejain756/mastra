@@ -1880,6 +1880,7 @@ export class MastraFactory {
                 requestContext,
                 storage: workItemsStorage,
                 uiOrigin: reviewSourceUiOrigin,
+                boards,
                 ...(storage.isDomainReady('source-control') ? { sessions: sourceControlSessions } : {}),
               }),
             );
