@@ -11,6 +11,7 @@ import { LEGACY_REVIEW_BOARD } from '../storage/domains/work-items/legacy-review
 import { createBoardRegistry, defaultBoards } from './registry.js';
 import type { BoardRegistry, InstalledBoard } from './registry.js';
 import { boardDefinitionOf, compileStoredBoard, mergeCodeBehaviour } from './stored-board.js';
+import { BOARD_MIGRATIONS } from './work-migrations.js';
 
 const DEFAULT_RECHECK_MS = 1000;
 /** A row under the retired Review board's key can't be served: its cards read as Work. */
@@ -252,6 +253,7 @@ export class ProjectBoardCache implements ProjectBoardSource {
     if (this.#seeded.has(key)) return;
     try {
       if (this.#seeds.size > 0) await this.#storage.seedBoards(scope, this.seeds());
+      await this.#migrate(scope);
       this.#seeded.add(key);
     } catch (error) {
       this.#warnOnce(
@@ -259,6 +261,17 @@ export class ProjectBoardCache implements ProjectBoardSource {
         `Boards for project ${scope.factoryProjectId} could not be stored; Factory stores them on the next load: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /** Runs the board migrations of the boards Factory stores here that the project hasn't had yet. */
+  async #migrate(scope: StoredBoardScope): Promise<void> {
+    const migrations = BOARD_MIGRATIONS.filter(migration => this.#seeds.has(migration.boardKey));
+    const changed = await this.#storage.applyBoardMigrations(scope, migrations);
+    if (changed.length === 0) return;
+    const filled = changed.map(({ boardKey, filled }) => `${boardKey}: ${filled.join(', ')}`).join('; ');
+    console.info(
+      `[factory] Updated the boards of project ${scope.factoryProjectId} that still held old defaults (${filled}).`,
+    );
   }
 
   #compile(scope: StoredBoardScope, rows: readonly StoredBoardRecord[]): ProjectBoards {
