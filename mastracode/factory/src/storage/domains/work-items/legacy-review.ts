@@ -8,6 +8,14 @@ import type { WorkItemDbRow, WorkItemStageEntry } from './base.js';
 export const LEGACY_REVIEW_BOARD = 'review';
 
 /**
+ * Work's keys, for rows written when Work was the only board: they carry no board, or Work's,
+ * and their phases are Work's by name. Only migrations and legacy writers read these.
+ */
+export const LEGACY_WORK_BOARD = 'work';
+export const LEGACY_TRIAGE_PHASE = 'triage';
+export const LEGACY_REST_PHASE = 'intake';
+
+/**
  * Whether a stored placement belongs to the retired Review board: stored on it, or a
  * pull request's own card from before boards were persisted, which sat on Review.
  */
