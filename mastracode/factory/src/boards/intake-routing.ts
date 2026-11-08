@@ -4,7 +4,7 @@ import type { StoredBoardsStorage, StoredIntakeRouteRecord } from '../storage/do
 import type { Card } from '../storage/domains/work-items/base.js';
 import type { BoardEventFacts } from './board-events.js';
 import type { BoardRegistry, InstalledBoard } from './registry.js';
-import { boardForWorkItem, hasPullRequest } from './semantics.js';
+import { boardFlow, boardForWorkItem, hasPullRequest } from './semantics.js';
 
 /** Reads a project's intake routes, in order. */
 export type IntakeRoutesReader = Pick<StoredBoardsStorage, 'listIntakeRoutes'>;
@@ -87,14 +87,16 @@ export function intakeTargetProblem(
 }
 
 /**
- * On Work a new pull request card lands in Intake or PR review, and nothing else lands in PR
- * review: a card arriving here carries no attached pull request yet. `FactoryTransitionService`
- * refuses any move that breaks this, so a route can't either.
+ * On a board that reviews pull requests a new pull request card lands at rest or in the pull
+ * request review phase, and nothing else lands in that review: a card arriving here carries no
+ * attached pull request yet. `FactoryTransitionService` refuses any move that breaks this, so a
+ * route can't either.
  */
-function placementTakesCard(boardId: string, phase: string, facts: RuleFacts): boolean {
-  const pullRequest = facts['source.kind'] === 'pull_request';
-  if (boardId === 'work') return pullRequest ? phase === 'intake' || phase === 'pr-review' : phase !== 'pr-review';
-  return true;
+function placementTakesCard(board: InstalledBoard, phase: string, facts: RuleFacts): boolean {
+  const review = boardFlow(board).pullRequestReview;
+  if (!review) return true;
+  if (facts['source.kind'] !== 'pull_request') return phase !== review;
+  return phase === review || board.phaseKind(phase) === 'resting';
 }
 
 /**
@@ -144,7 +146,7 @@ export function resolveIntakeRoute(
       };
     }
     const phase = landingPhase(board, route.target.phaseKey);
-    if (!placementTakesCard(board.id, phase, facts)) continue;
+    if (!placementTakesCard(board, phase, facts)) continue;
     return { type: 'place', board: board.id, phase, routeId: route.id };
   }
   return undefined;
@@ -202,7 +204,7 @@ export function resolveEventRoute(
     if (!route.enabled || !route.on.includes(event.type) || route.target.boardKey !== board.id) continue;
     if (!evaluateRuleGroup(route.when, facts)) continue;
     const phase = route.target.phaseKey ?? board.initialPhase;
-    if (board.phaseKind(phase) === undefined || !placementTakesCard(board.id, phase, facts)) continue;
+    if (board.phaseKind(phase) === undefined || !placementTakesCard(board, phase, facts)) continue;
     return { phase, routeId: route.id, allowWorkingPhase: route.allowWorkingPhase };
   }
   return undefined;
