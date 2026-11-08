@@ -1,11 +1,11 @@
 ---
 name: factory-plan
-description: Produce a phased implementation plan for a Factory work item and submit it for approval, which moves the card to Building
+description: Produce a phased implementation plan for a Factory work item and submit it for approval, which moves the card on to building
 ---
 
 # Factory Plan
 
-Produce a phased, verifiable implementation plan for this Factory work item, then submit it with `submit_plan`. Once the plan is approved, Factory moves the card to Building (`execute`) on its own; the approved plan is the builder's handoff.
+Produce a phased, verifiable implementation plan for this Factory work item, then submit it with `submit_plan`. Once the plan is approved, Factory moves the card to the phase the `factory-phase` signal says the exit tool leads to (Building on the default board) on its own; the approved plan is the builder's handoff.
 
 You are working in a bound Factory session. The `factory-work-item` signal describes the card: its sources, labels, author and whether that author is trusted, the provider tool to fetch the issue with, and the card's Factory state. Complete the full planning pass in one run, then make `submit_plan` your terminal step. Never wait for or solicit human input mid-run; every design decision is yours to resolve.
 

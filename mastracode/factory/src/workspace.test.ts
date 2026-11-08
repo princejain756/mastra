@@ -519,7 +519,7 @@ describe('bundled Factory skill assets', () => {
     expect(triage).toContain('Await approval');
     expect(triage).toContain('No transition / refresh');
     expect(triage).toContain(
-      'use `Route: Await approval` and request `stage: "intake"`. The card rests in Intake until a maintainer moves it on',
+      'use `Route: Await approval` and request the `rest` phase (`intake` on the default board). The card rests there until a maintainer moves it on',
     );
     expect(triage).toContain('never pass a `triageType` argument');
     expect(triage).toContain('approval_required');
@@ -574,10 +574,12 @@ describe('bundled Factory skill assets', () => {
     // the project's self-review setting.
     const build = await read('factory-build');
     expect(build).toContain('only with `ask_user`');
-    expect(build).toContain('**Self-review on:** do not open a pull or merge request. Move the card to Review');
+    expect(build).toContain('do not open a pull or merge request. Move the card to its `self-review` phase');
     expect(build).toContain('**Self-review off:** open the change request');
-    expect(build).toContain('Then move the card to PR review (`stage: "pr-review"`)');
-    expect(build).toContain('**Before moving to Done:**');
+    expect(build).toContain('Then move the card to its `pull request review` phase');
+    expect(build).toContain('`Board phases by part:` line names each phase');
+    expect(build).not.toMatch(/stage: "(review|pr-review|planning)"/);
+    expect(build).toContain('**Before moving to the completed phase:**');
 
     const review = await read('factory-review');
     expect(review).toContain('Verdict: approve');
