@@ -11,8 +11,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createScorer } from '../../../../evals';
 import type { ScoringHookInput } from '../../../../evals';
 import { AvailableHooks, registerHook } from '../../../../hooks';
+import { captureOutcomeEvents } from '../../../../loop/test-utils/aimock/outcome-test-utils';
 import { Mastra } from '../../../../mastra';
+import { InternalSpans, SpanType, resolveExportedSpanId } from '../../../../observability';
 import { MessageList } from '../../../message-list';
+import { deleteRunRegistryEntry, setRunRegistryEntry } from '../../run-registry';
 import type { DurableAgenticExecutionOutput, DurableAgenticWorkflowInput } from '../../types';
 import { executeDurableAgentScorers } from './execute-scorers';
 
@@ -109,6 +112,112 @@ describe('executeDurableAgentScorers', () => {
 
       expect(JSON.stringify(payloads[0]?.output)).toContain('it is sunny');
       expect(JSON.stringify(payloads[0]?.input)).toContain('what is the weather?');
+    });
+
+    it('attributes the score to the stored agent_run span when the step span parents to an unexported workflow span (#29795)', async () => {
+      const { observability } = captureOutcomeEvents();
+      const mastra = new Mastra({
+        observability,
+        scorers: { myScorer: buildScorer() },
+        logger: false,
+      });
+      const instance = mastra.observability.getDefaultInstance()!;
+
+      const agentSpan = instance.startSpan({
+        type: SpanType.AGENT_RUN,
+        name: "agent run: 'weather-agent'",
+      });
+      const agentSpanData = agentSpan.snapshot?.() ?? agentSpan.exportSpan();
+
+      // Simulate Inngest's remote step execution: workflowSpan is internal (excluded from export),
+      // and stepSpan is rebuilt from exported data with parentSpanId = workflowSpan.id and no
+      // live in-memory `.parent` chain back to agentSpan.
+      const workflowSpan = instance.startSpan({
+        type: SpanType.WORKFLOW_RUN,
+        name: "workflow run: 'agentic-execution'",
+        tracingPolicy: { internal: InternalSpans.WORKFLOW },
+        tracingOptions: { traceId: agentSpan.traceId, parentSpanId: agentSpan.id },
+      });
+      const rawStepSpan = instance.startSpan({
+        type: SpanType.WORKFLOW_STEP,
+        name: "workflow step: 'execute-scorers'",
+        traceId: workflowSpan.traceId,
+        parentSpanId: workflowSpan.id,
+        tracingPolicy: { internal: InternalSpans.WORKFLOW },
+      });
+      const rebuiltStepSpan = instance.rebuildSpan((rawStepSpan.snapshot?.() ?? rawStepSpan.exportSpan())!);
+
+      // Sanity check: resolving the raw remote step span directly yields the unexported workflow span id.
+      expect(resolveExportedSpanId(rebuiltStepSpan)).toBe(workflowSpan.id);
+
+      await executeDurableAgentScorers({
+        initData: buildInitData({ agentSpanData }),
+        finalOutput: buildFinalOutput(),
+        mastra,
+        tracingContext: { currentSpan: rebuiltStepSpan },
+      });
+      await waitForPayloads(1);
+
+      expect(payloads).toHaveLength(1);
+      const currentSpan = payloads[0]?.tracingContext?.currentSpan;
+      expect(currentSpan?.traceId).toBe(agentSpan.traceId);
+      expect(currentSpan ? resolveExportedSpanId(currentSpan) : undefined).toBe(agentSpan.id);
+    });
+
+    it('prefers the resumed agent_run span from the run registry even if the entry is cleaned up while messages load (#29795)', async () => {
+      const { observability } = captureOutcomeEvents();
+      const mastra = new Mastra({
+        observability,
+        scorers: { myScorer: buildScorer() },
+        logger: false,
+      });
+      const instance = mastra.observability.getDefaultInstance()!;
+
+      const initialAgentSpan = instance.startSpan({
+        type: SpanType.AGENT_RUN,
+        name: "agent run: 'weather-agent'",
+      });
+      const resumedAgentSpan = instance.startSpan({
+        type: SpanType.AGENT_RUN,
+        name: "agent run: 'weather-agent' (resumed)",
+        traceId: initialAgentSpan.traceId,
+      });
+
+      const runId = 'run-resumed-scorer-span';
+      setRunRegistryEntry(
+        runId,
+        {
+          mastra,
+          tools: {},
+          model: undefined as any,
+          agentSpan: initialAgentSpan as any,
+          resumeAgentSpan: resumedAgentSpan as any,
+          resumeAgentSpanData: resumedAgentSpan.snapshot?.() ?? resumedAgentSpan.exportSpan(),
+        },
+        mastra,
+      );
+
+      try {
+        await executeDurableAgentScorers({
+          initData: buildInitData({
+            runId,
+            agentSpanData: initialAgentSpan.snapshot?.() ?? initialAgentSpan.exportSpan(),
+          }),
+          finalOutput: buildFinalOutput(),
+          mastra,
+          loadStoredMessages: async ids => {
+            deleteRunRegistryEntry(runId, mastra);
+            return ids.map(() => undefined as any);
+          },
+        });
+        await waitForPayloads(1);
+
+        expect(payloads).toHaveLength(1);
+        const currentSpan = payloads[0]?.tracingContext?.currentSpan;
+        expect(currentSpan ? resolveExportedSpanId(currentSpan) : undefined).toBe(resumedAgentSpan.id);
+      } finally {
+        deleteRunRegistryEntry(runId, mastra);
+      }
     });
   });
 

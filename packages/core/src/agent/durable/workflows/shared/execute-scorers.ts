@@ -2,9 +2,11 @@ import type { MastraScorer, MastraScorerEntry } from '../../../../evals/base';
 import { runScorer } from '../../../../evals/hooks';
 import type { Mastra } from '../../../../mastra';
 import { createObservabilityContext } from '../../../../observability';
+import type { ExportedSpan, SpanType } from '../../../../observability';
 import { RequestContext } from '../../../../request-context';
 import { MessageList } from '../../../message-list';
 import type { StoredMessageLoader } from '../../../message-list/memory-message-refs';
+import { getRunRegistryEntry } from '../../run-registry';
 import type { DurableAgenticLoopOutput, DurableAgenticWorkflowInput } from '../../types';
 
 export interface ExecuteDurableAgentScorersParams {
@@ -54,6 +56,28 @@ export async function executeDurableAgentScorers({
   }
 
   const logger = mastra?.getLogger?.();
+  const resolveContext = requestContext ?? new RequestContext();
+
+  // On remote engines (e.g. Inngest) the `execute-scorers` step's own span is an
+  // internal WORKFLOW_STEP span whose parent is the internal WORKFLOW_RUN span
+  // (never exported), with no live in-memory parent link back to the AGENT_RUN
+  // span. Resolve the run's live or rebuilt AGENT_RUN span before the first await
+  // (before caller cleanup drops the registry entry) so post-run scores reference
+  // the stored agent_run span (#29795).
+  const registryEntry = getRunRegistryEntry(initData.runId, mastra);
+  const agentSpanData = registryEntry?.resumeAgentSpanData ?? initData.agentSpanData;
+  let agentSpan = registryEntry?.resumeAgentSpan ?? registryEntry?.agentSpan;
+  if (!agentSpan && agentSpanData) {
+    try {
+      const observability = mastra?.observability?.getSelectedInstance({ requestContext: resolveContext });
+      agentSpan = observability?.rebuildSpan(agentSpanData as ExportedSpan<SpanType.AGENT_RUN>);
+    } catch {
+      agentSpan = undefined;
+    }
+  }
+  const scorerObservabilityContext = createObservabilityContext(
+    agentSpan ? { currentSpan: agentSpan } : tracingContext,
+  );
 
   // Messages as they stood before generation are the scorer's input.
   const inputMessageList = new MessageList();
@@ -79,8 +103,6 @@ export async function executeDurableAgentScorers({
     });
     return;
   }
-
-  const resolveContext = requestContext ?? new RequestContext();
 
   for (const [scorerKey, scorerEntry] of Object.entries(scorers)) {
     const { scorerName, sampling, filter } = scorerEntry;
@@ -136,7 +158,7 @@ export async function executeDurableAgentScorers({
         entityType: 'AGENT',
         threadId: initData.state?.threadId,
         resourceId: initData.state?.resourceId,
-        ...createObservabilityContext(tracingContext),
+        ...scorerObservabilityContext,
       });
     } catch (error) {
       // Scoring is observability, not execution: never fail a run over it.
