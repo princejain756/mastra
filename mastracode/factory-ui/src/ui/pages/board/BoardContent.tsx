@@ -1,3 +1,4 @@
+import { boardLoop } from '../../domains/factory/boardFlow';
 import { Notice } from '@mastra/playground-ui/components/Notice';
 import { toast } from '@mastra/playground-ui/components/Toaster';
 import type { InstalledBoardInfo } from '../../../api/types';
@@ -82,7 +83,8 @@ export function BoardContent({
   definition: InstalledBoardInfo;
 }) {
   const factoryProjectId = factory.id;
-  const builtin = kind === 'work';
+  // A board with a pull request loop runs Factory's automation; the default board keeps its own column icons.
+  const runsLoop = boardLoop(definition) !== undefined;
   const stages = definition.phases.map(phase => ({ ...phase, label: phase.title }));
   const auth = useFactoryAuth();
   const currentUserId = auth.data?.user?.userId;
@@ -189,6 +191,7 @@ export function BoardContent({
   const boardWorkItems = [...workItemsByStage.values()].flat();
   const targetReady = !items.isPending && (!targetItemId || boardWorkItems.some(item => item.id === targetItemId));
   const loadingStages = boardLoadingStages({
+    board: definition,
     stages,
     itemsPending: items.isPending,
     intakePending: intake.isPending,
@@ -246,7 +249,7 @@ export function BoardContent({
     const canConnectSource = isInitialPhase && !hasIntakeSource;
     const showEmptyStateActions = isInitialPhase && (filtersExcludeAll || canCreate || canConnectSource);
     const collapsed =
-      builtin &&
+      runsLoop &&
       !isInitialPhase &&
       !loading &&
       !composerOpen &&
@@ -255,7 +258,7 @@ export function BoardContent({
       taskCount === 0;
     return {
       stage,
-      phaseKind: builtin ? undefined : stage.kind,
+      phaseKind: definition.default ? undefined : stage.kind,
       loading,
       taskCount,
       collapsed,
@@ -357,7 +360,7 @@ export function BoardContent({
               cardProjectRepositoryId(factory.repositories, candidate, repository.projectRepositoryId)
             }
             factoryProjectId={factoryProjectId}
-            board={builtin ? kind : undefined}
+            board={definition}
             onRun={(candidate, move, prompt) =>
               dropWithRepository(candidatePayload(candidate, prompt), move.stage, 'card_action')
             }
@@ -408,7 +411,7 @@ export function BoardContent({
             availableLabels={availableLabels}
             currentUserId={currentUserId}
             aside={
-              builtin && (
+              runsLoop && (
                 <BoardAutomationSettings
                   factoryProjectId={factoryProjectId}
                   autoRunEnabled={factory.autoRunEnabled ?? false}

@@ -84,13 +84,16 @@ export function boardFlow(board: InstalledBoard | undefined): FactoryRuleBoardFl
       )?.[0]
     : undefined;
   const buildRole = build ? board.roleForPhase(build) : undefined;
-  const triage = entries.find(
-    ([key, phase]) =>
-      phase.kind === 'working' &&
-      key !== build &&
-      phase.runner.context !== REVIEW_CONTEXT &&
-      (buildRole === undefined || phase.runner.context !== buildRole),
-  )?.[0];
+  // Only a board that builds sorts cards first; elsewhere a working phase is just its own step.
+  const triage = build
+    ? entries.find(
+        ([key, phase]) =>
+          phase.kind === 'working' &&
+          key !== build &&
+          phase.runner.context !== REVIEW_CONTEXT &&
+          phase.runner.context !== buildRole,
+      )?.[0]
+    : undefined;
   const terminals = entries.filter(([, phase]) => phase.kind === 'terminal').map(([key]) => key);
   const completed = board.sourceClosed?.completed ?? terminals[0];
   const canceled = board.sourceClosed?.canceled ?? terminals.find(key => key !== completed) ?? completed;

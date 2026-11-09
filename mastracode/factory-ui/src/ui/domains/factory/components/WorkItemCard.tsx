@@ -15,6 +15,7 @@ import { setDragPayload } from '../boardDrag';
 import type { DragPayload } from '../boardDrag';
 import { itemThreadSession } from '../boardItems';
 import type { BoardLayout } from '../boardLayout';
+import { boardLoop } from '../boardFlow';
 import { itemBoard } from '../boardStages';
 import {
   awaitsTriageDecision,
@@ -100,12 +101,13 @@ export function WorkItemCard({
   const morph = useCardMorph();
   const catalog = useBoardCatalog(item.githubProjectId);
   const boardId = itemBoard(item);
-  const custom = boardId !== 'work';
   const definition = catalog.data?.find(board => board.id === boardId);
+  // A board without a pull request loop advances cards through its own phases instead.
+  const custom = boardLoop(definition) === undefined;
 
   const startingLabel = proposal !== undefined && approvingDecisionId === proposal.id ? 'Starting…' : preparing;
   const sessions = item.sessions;
-  const moves = cardMoves(item, columnStage);
+  const moves = cardMoves(item, columnStage, definition);
   const primaryMove = primaryCardMove(moves, columnStage, { sessions, stageHistory: item.stageHistory });
   const threadSession = itemThreadSession(sessions);
   const nextPhase = nextBoardPhase(definition, columnStage);
@@ -125,7 +127,7 @@ export function WorkItemCard({
     decision,
     transitionReason,
     sessionStatus,
-    held: awaitsTriageDecision(item, columnStage),
+    held: awaitsTriageDecision(item, columnStage, definition),
   });
   const { status, owner, wick } = state;
   const lockedByYou = owner.kind === 'you';
@@ -136,11 +138,10 @@ export function WorkItemCard({
   const retryDecisionId = status.kind === 'error' ? status.retryDecisionId : undefined;
   const primaryAction = cardPrimaryAction({
     item,
+    board: definition,
     columnStage,
     move: primaryMove,
-    resumeStage: custom
-      ? undefined
-      : resumeStage(columnStage, { board: boardId, sessions, stageHistory: item.stageHistory }),
+    resumeStage: resumeStage(columnStage, { sessions, stageHistory: item.stageHistory }, definition),
     nextPhase: custom ? nextPhase : undefined,
     waiting: status.kind === 'waiting' ? status : undefined,
     hasSession: threadSession !== undefined,
