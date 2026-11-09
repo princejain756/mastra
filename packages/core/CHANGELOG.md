@@ -1,5 +1,25 @@
 # @mastra/core
 
+## 1.83.0-alpha.3
+
+### Patch Changes
+
+- Durable agent runs now surface a publish failure immediately instead of stalling for ten seconds. When the event transport rejected a publish, the frame stayed in the replay log but never arrived live, so the stream waited out its pending-frame deadline before delivering the error. ([#29718](https://github.com/mastra-ai/mastra/pull/29718))
+
+- Export `AgentStreamBus`, `createRunAbortController`, and the `RunAbortController` type from `@mastra/core/agent/durable` for shared stream-bus and caller-cancellation setup. ([#29635](https://github.com/mastra-ai/mastra/pull/29635))
+
+  ```ts
+  import { AgentStreamBus, createRunAbortController, type RunAbortController } from '@mastra/core/agent/durable';
+
+  const caller = new AbortController();
+  const run: RunAbortController = createRunAbortController(caller.signal);
+  caller.abort(new Error('Stop this run'));
+  console.log(run.controller.signal.aborted); // true
+  run.detach();
+  ```
+
+  Plain and durable agents share caller-abort forwarding. Existing stream delivery and cleanup policies are preserved.
+
 ## 1.83.0-alpha.2
 
 ## 1.83.0-alpha.1

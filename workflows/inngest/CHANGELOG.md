@@ -1,5 +1,14 @@
 # @mastra/inngest
 
+## 1.11.2-alpha.2
+
+### Patch Changes
+
+- Preserve existing stream replay and cancellation behavior for Inngest agents, including agents configured with a custom replay cache. ([#29635](https://github.com/mastra-ai/mastra/pull/29635))
+
+- Updated dependencies [[`7358ad7`](https://github.com/mastra-ai/mastra/commit/7358ad73a381765572858d520f8170ab59e88514), [`ed1cecb`](https://github.com/mastra-ai/mastra/commit/ed1cecba5c26a73600640f74e9a1c9d322271b23)]:
+  - @mastra/core@1.83.0-alpha.3
+
 ## 1.11.2-alpha.1
 
 ### Patch Changes

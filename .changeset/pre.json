@@ -339,6 +339,7 @@
     "quick-pages-prune",
     "quiet-apps-refuse",
     "quiet-journal-runs",
+    "quiet-otters-wait",
     "quiet-owls-approve",
     "quiet-tools-redact",
     "quiet-voices-wait",
@@ -352,6 +353,7 @@
     "sensitive-filter-redact-objects",
     "seven-goats-jog",
     "shaggy-suits-happen",
+    "shared-agent-run-session",
     "shared-run-access-policy",
     "shiny-mangos-lead",
     "silly-gifts-flash",
@@ -394,6 +396,7 @@
     "violet-cooks-push",
     "voxtral-stt-provider",
     "warm-hosts-wave",
+    "wide-impalas-accept",
     "wild-aliens-drop",
     "witty-deer-travel",
     "yummy-hotels-sneeze"
