@@ -26,10 +26,44 @@ import { TracingEventType } from '@mastra/core/observability';
 import { BaseExporter, getExternalParentId } from '@mastra/observability';
 import type { BaseExporterConfig } from '@mastra/observability';
 import { SpanConverter, convertLog, getSpanKind } from '@mastra/otel-exporter';
+import * as otelApi from '@opentelemetry/api';
 import { trace as otelTrace, context as otelContext, isSpanContextValid, TraceFlags } from '@opentelemetry/api';
 import type { Span as OtelSpan, Context as OtelContext, Link, TracerProvider, Tracer } from '@opentelemetry/api';
 import { logs as otelLogs } from '@opentelemetry/api-logs';
 import type { Logger as OtelLogger, LoggerProvider } from '@opentelemetry/api-logs';
+
+type LogsApiLike = {
+  getLoggerProvider(): LoggerProvider;
+};
+
+/**
+ * Returns true when `provider` is a real registered LoggerProvider (or a proxy
+ * whose delegate has been set), rather than an unconfigured ProxyLoggerProvider.
+ */
+function isConfiguredLoggerProvider(provider: unknown): provider is LoggerProvider {
+  if (!provider || typeof provider !== 'object') return false;
+  if ('_getDelegate' in provider && typeof (provider as { _getDelegate: unknown })._getDelegate === 'function') {
+    return (provider as { _delegate?: unknown })._delegate !== undefined;
+  }
+  return true;
+}
+
+/**
+ * Resolve the global LoggerProvider across both OpenTelemetry JS SDK 3
+ * (`logs` on `@opentelemetry/api` >= 1.10) and SDK 2 (`@opentelemetry/api-logs`).
+ */
+function getGlobalLoggerProvider(): LoggerProvider {
+  const apiLogs = (otelApi as { logs?: LogsApiLike }).logs;
+  const apiProvider = apiLogs?.getLoggerProvider();
+  if (isConfiguredLoggerProvider(apiProvider)) {
+    return apiProvider;
+  }
+  const legacyProvider = otelLogs.getLoggerProvider();
+  if (isConfiguredLoggerProvider(legacyProvider)) {
+    return legacyProvider;
+  }
+  return apiProvider ?? legacyProvider;
+}
 
 function linkKey(link: { traceId: string; spanId: string }): string {
   return `${link.traceId}:${link.spanId}`;
@@ -93,8 +127,19 @@ export class OtelBridge extends BaseExporter implements ObservabilityBridge {
     this.hasCustomLoggerProvider = config.loggerProvider !== undefined;
     this.tracerProvider = config.tracerProvider ?? otelTrace.getTracerProvider();
     this.otelTracer = this.tracerProvider.getTracer('@mastra/otel-bridge', '1.0.0');
-    this.loggerProvider = config.loggerProvider ?? otelLogs.getLoggerProvider();
+    this.loggerProvider = config.loggerProvider ?? getGlobalLoggerProvider();
     this.otelLogger = this.loggerProvider.getLogger('@mastra/otel-bridge', '1.0.0');
+  }
+
+  private resolveOtelLogger(): OtelLogger {
+    if (!this.hasCustomLoggerProvider) {
+      const currentProvider = getGlobalLoggerProvider();
+      if (currentProvider !== this.loggerProvider) {
+        this.loggerProvider = currentProvider;
+        this.otelLogger = currentProvider.getLogger('@mastra/otel-bridge', '1.0.0');
+      }
+    }
+    return this.otelLogger;
   }
 
   /**
@@ -137,7 +182,7 @@ export class OtelBridge extends BaseExporter implements ObservabilityBridge {
 
       const logContext = this.resolveLogContext(params.traceId, params.spanId);
 
-      this.otelLogger.emit({
+      this.resolveOtelLogger().emit({
         timestamp: params.timestamp,
         severityNumber: params.severityNumber,
         severityText: params.severityText,
@@ -475,10 +520,14 @@ export class OtelBridge extends BaseExporter implements ObservabilityBridge {
    */
   async flush(): Promise<void> {
     // Re-resolve the global providers on every flush: the OTEL SDK is often
-    // registered after the bridge is constructed, and `otelLogs.getLoggerProvider()`
+    // registered after the bridge is constructed, and `getGlobalLoggerProvider()`
     // only returns the real provider once one has been registered.
     const tracerProvider = this.hasCustomTracerProvider ? this.tracerProvider : otelTrace.getTracerProvider();
-    const loggerProvider = this.hasCustomLoggerProvider ? this.loggerProvider : otelLogs.getLoggerProvider();
+    const loggerProvider = this.hasCustomLoggerProvider ? this.loggerProvider : getGlobalLoggerProvider();
+    if (!this.hasCustomLoggerProvider && loggerProvider !== this.loggerProvider) {
+      this.loggerProvider = loggerProvider;
+      this.otelLogger = loggerProvider.getLogger('@mastra/otel-bridge', '1.0.0');
+    }
     await this.flushProvider(tracerProvider, 'tracer');
     await this.flushProvider(loggerProvider, 'logger');
   }
@@ -495,6 +544,13 @@ export class OtelBridge extends BaseExporter implements ObservabilityBridge {
         typeof (provider as { getDelegate: unknown }).getDelegate === 'function'
       ) {
         provider = (provider as { getDelegate: () => unknown }).getDelegate();
+      } else if (
+        provider &&
+        typeof provider === 'object' &&
+        '_getDelegate' in provider &&
+        typeof (provider as { _getDelegate: unknown })._getDelegate === 'function'
+      ) {
+        provider = (provider as { _getDelegate: () => unknown })._getDelegate();
       }
       if (
         provider &&

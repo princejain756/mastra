@@ -15,6 +15,7 @@ import { InternalSpans, SamplingStrategyType, SpanType, TracingEventType } from 
 import { InMemoryStore } from '@mastra/core/storage';
 import { createTool } from '@mastra/core/tools';
 import { DefaultObservabilityInstance, Observability, TestExporter } from '@mastra/observability';
+import * as otelApi from '@opentelemetry/api';
 import { context, isSpanContextValid, trace } from '@opentelemetry/api';
 import { logs as otelLogs, SeverityNumber } from '@opentelemetry/api-logs';
 import { InMemoryLogRecordExporter, LoggerProvider, SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
@@ -1005,6 +1006,77 @@ describe('OtelBridge', () => {
         // so it should never receive the record either.
         expect(logExporter.getFinishedLogRecords()).toHaveLength(0);
       } finally {
+        otelLogs.setGlobalLoggerProvider(loggerProvider);
+      }
+    });
+
+    it('emits and flushes logs when the global LoggerProvider is registered via @opentelemetry/api (OpenTelemetry JS SDK 3)', async () => {
+      const apiLogs = (otelApi as unknown as { logs: typeof otelLogs }).logs;
+      otelLogs.disable();
+      apiLogs.disable();
+
+      const sdk3Exporter = new InMemoryLogRecordExporter();
+      const sdk3Provider = new LoggerProvider({
+        processors: [new SimpleLogRecordProcessor({ exporter: sdk3Exporter })],
+      });
+      let flushed = false;
+      const originalFlush = sdk3Provider.forceFlush.bind(sdk3Provider);
+      sdk3Provider.forceFlush = async () => {
+        flushed = true;
+        return originalFlush();
+      };
+
+      try {
+        apiLogs.setGlobalLoggerProvider(sdk3Provider);
+
+        const bridge = new OtelBridge();
+        expect(bridge['loggerProvider']).toBe(sdk3Provider);
+
+        await bridge.onLogEvent(makeLogEvent({ level: 'warn', message: 'hello from sdk 3' }));
+        await bridge.flush();
+
+        const records = sdk3Exporter.getFinishedLogRecords();
+        expect(records).toHaveLength(1);
+        expect(records[0]!.body).toBe('hello from sdk 3');
+        expect(records[0]!.severityNumber).toBe(SeverityNumber.WARN);
+        expect(flushed).toBe(true);
+
+        await bridge.shutdown();
+        await sdk3Provider.shutdown();
+      } finally {
+        apiLogs.disable();
+        otelLogs.setGlobalLoggerProvider(loggerProvider);
+      }
+    });
+
+    it('re-resolves the global LoggerProvider when registered via @opentelemetry/api after OtelBridge construction', async () => {
+      const apiLogs = (otelApi as unknown as { logs: typeof otelLogs }).logs;
+      otelLogs.disable();
+      apiLogs.disable();
+
+      const sdk3Exporter = new InMemoryLogRecordExporter();
+      const sdk3Provider = new LoggerProvider({
+        processors: [new SimpleLogRecordProcessor({ exporter: sdk3Exporter })],
+      });
+
+      try {
+        // Construct the bridge before any global LoggerProvider is registered
+        const bridge = new OtelBridge();
+
+        apiLogs.setGlobalLoggerProvider(sdk3Provider);
+
+        await bridge.onLogEvent(makeLogEvent({ level: 'info', message: 'registered after bridge init' }));
+        await bridge.flush();
+
+        const records = sdk3Exporter.getFinishedLogRecords();
+        expect(records).toHaveLength(1);
+        expect(records[0]!.body).toBe('registered after bridge init');
+        expect(bridge['loggerProvider']).toBe(sdk3Provider);
+
+        await bridge.shutdown();
+        await sdk3Provider.shutdown();
+      } finally {
+        apiLogs.disable();
         otelLogs.setGlobalLoggerProvider(loggerProvider);
       }
     });
