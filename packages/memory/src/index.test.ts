@@ -3976,4 +3976,179 @@ describe('Memory', () => {
       );
     });
   });
+
+  describe('Working memory instruction overrides on Memory subclasses', () => {
+    it('forwards overridden getWorkingMemoryToolInstruction to Agent prompt via WorkingMemory processor', async () => {
+      class CustomInstructionMemory extends Memory {
+        protected override getWorkingMemoryToolInstruction({
+          template,
+          data,
+        }: {
+          template: { format: 'markdown' | 'json'; content: string | Record<string, unknown> };
+          data: string | null;
+        }) {
+          return `CUSTOM_WORKING_MEMORY_INSTRUCTION\ntemplate=${String(template.content)}\ndata=${data ?? 'none'}`;
+        }
+      }
+
+      const memory = new CustomInstructionMemory({
+        storage: new InMemoryStore(),
+        options: {
+          workingMemory: {
+            enabled: true,
+            template: '# Profile\n- Name:',
+          },
+        },
+      });
+
+      let capturedPrompt: any[] = [];
+      const model = new MockLanguageModelV2({
+        doGenerate: async ({ prompt }) => {
+          capturedPrompt = prompt;
+          return {
+            rawCall: { rawPrompt: null, rawSettings: {} },
+            finishReason: 'stop',
+            usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+            content: [{ type: 'text', text: 'Ack' }],
+            warnings: [],
+          };
+        },
+      });
+
+      const agent = new Agent({
+        id: 'wm-override-agent',
+        name: 'WM Override Agent',
+        instructions: 'You are a test assistant.',
+        model,
+        memory,
+      });
+
+      await agent.generate('Hello', {
+        memory: {
+          thread: 'wm-override-thread',
+          resource: 'wm-override-resource',
+        },
+      });
+
+      const systemMessages = capturedPrompt
+        .filter(msg => msg.role === 'system')
+        .map(msg => (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)));
+
+      expect(systemMessages.some(text => text.includes('CUSTOM_WORKING_MEMORY_INSTRUCTION'))).toBe(true);
+      expect(systemMessages.some(text => text.includes('template=# Profile\n- Name:'))).toBe(true);
+      expect(systemMessages.some(text => text.includes('WORKING_MEMORY_SYSTEM_INSTRUCTION:'))).toBe(false);
+    });
+
+    it('forwards overridden __experimental_getWorkingMemoryToolInstructionVNext and getReadOnlyWorkingMemoryInstruction to Agent prompt', async () => {
+      class CustomVNextAndReadOnlyMemory extends Memory {
+        protected override __experimental_getWorkingMemoryToolInstructionVNext({
+          data,
+        }: {
+          template: { format: 'markdown' | 'json'; content: string | Record<string, unknown> };
+          data: string | null;
+        }) {
+          return `CUSTOM_VNEXT_WM_INSTRUCTION: data=${data ?? 'none'}`;
+        }
+
+        protected override getReadOnlyWorkingMemoryInstruction({
+          data,
+          autoUpdated,
+        }: {
+          template: { format: 'markdown' | 'json'; content: string | Record<string, unknown> };
+          data: string | null;
+          autoUpdated?: boolean;
+        }) {
+          return `CUSTOM_READONLY_WM_INSTRUCTION: autoUpdated=${Boolean(autoUpdated)} data=${data ?? 'none'}`;
+        }
+      }
+
+      const vNextMemory = new CustomVNextAndReadOnlyMemory({
+        storage: new InMemoryStore(),
+        options: {
+          workingMemory: {
+            enabled: true,
+            template: '# Profile\n- Name:',
+            version: 'vnext',
+          },
+        },
+      });
+
+      let vNextPrompt: any[] = [];
+      const vNextAgent = new Agent({
+        id: 'wm-vnext-override-agent',
+        name: 'WM VNext Override Agent',
+        instructions: 'You are a test assistant.',
+        model: new MockLanguageModelV2({
+          doGenerate: async ({ prompt }) => {
+            vNextPrompt = prompt;
+            return {
+              rawCall: { rawPrompt: null, rawSettings: {} },
+              finishReason: 'stop',
+              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+              content: [{ type: 'text', text: 'Ack' }],
+              warnings: [],
+            };
+          },
+        }),
+        memory: vNextMemory,
+      });
+
+      await vNextAgent.generate('Hello', {
+        memory: {
+          thread: 'wm-vnext-thread',
+          resource: 'wm-vnext-resource',
+        },
+      });
+
+      const vNextSystem = vNextPrompt
+        .filter(msg => msg.role === 'system')
+        .map(msg => (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)));
+      expect(vNextSystem.some(text => text.includes('CUSTOM_VNEXT_WM_INSTRUCTION: data=none'))).toBe(true);
+
+      const readOnlyMemory = new CustomVNextAndReadOnlyMemory({
+        storage: new InMemoryStore(),
+        options: {
+          readOnly: true,
+          workingMemory: {
+            enabled: true,
+            template: '# Profile\n- Name:',
+          },
+        },
+      });
+
+      let readOnlyPrompt: any[] = [];
+      const readOnlyAgent = new Agent({
+        id: 'wm-readonly-override-agent',
+        name: 'WM ReadOnly Override Agent',
+        instructions: 'You are a test assistant.',
+        model: new MockLanguageModelV2({
+          doGenerate: async ({ prompt }) => {
+            readOnlyPrompt = prompt;
+            return {
+              rawCall: { rawPrompt: null, rawSettings: {} },
+              finishReason: 'stop',
+              usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+              content: [{ type: 'text', text: 'Ack' }],
+              warnings: [],
+            };
+          },
+        }),
+        memory: readOnlyMemory,
+      });
+
+      await readOnlyAgent.generate('Hello', {
+        memory: {
+          thread: 'wm-readonly-thread',
+          resource: 'wm-readonly-resource',
+        },
+      });
+
+      const readOnlySystem = readOnlyPrompt
+        .filter(msg => msg.role === 'system')
+        .map(msg => (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)));
+      expect(
+        readOnlySystem.some(text => text.includes('CUSTOM_READONLY_WM_INSTRUCTION: autoUpdated=false data=none')),
+      ).toBe(true);
+    });
+  });
 });

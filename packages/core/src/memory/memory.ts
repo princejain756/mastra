@@ -805,6 +805,25 @@ https://mastra.ai/en/docs/memory/overview`,
     return undefined;
   }
 
+  protected getWorkingMemoryToolInstruction?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+  }): string | null;
+
+  /**
+   * @warning experimental! can be removed or changed at any time
+   */
+  protected __experimental_getWorkingMemoryToolInstructionVNext?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+  }): string | null;
+
+  protected getReadOnlyWorkingMemoryInstruction?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+    autoUpdated?: boolean;
+  }): string | null;
+
   /**
    * Get input processors for this memory instance
    * This allows Memory to be used as a ProcessorProvider in Agent's inputProcessors array.
@@ -895,6 +914,18 @@ https://mastra.ai/en/docs/memory/overview`,
               'version' in effectiveConfig.workingMemory &&
               effectiveConfig.workingMemory.version === 'vnext',
             templateProvider: this,
+            instructionProvider: {
+              getWorkingMemoryToolInstruction: this.getWorkingMemoryToolInstruction
+                ? args => this.getWorkingMemoryToolInstruction!(args)
+                : undefined,
+              __experimental_getWorkingMemoryToolInstructionVNext: this
+                .__experimental_getWorkingMemoryToolInstructionVNext
+                ? args => this.__experimental_getWorkingMemoryToolInstructionVNext!(args)
+                : undefined,
+              getReadOnlyWorkingMemoryInstruction: this.getReadOnlyWorkingMemoryInstruction
+                ? args => this.getReadOnlyWorkingMemoryInstruction!(args)
+                : undefined,
+            },
             readOnly: effectiveConfig.readOnly,
             agentManaged:
               typeof effectiveConfig.workingMemory === 'object'

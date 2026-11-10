@@ -1082,4 +1082,160 @@ describe('WorkingMemory', () => {
       },
     );
   });
+
+  describe('Custom instruction provider', () => {
+    it('delegates tool instruction generation to instructionProvider when provided', async () => {
+      const customGetInstruction = vi.fn(
+        ({ template, data }: { template: WorkingMemoryTemplate; data: string | null }) =>
+          `CUSTOM_TOOL_INSTRUCTION: format=${template.format} data=${data ?? 'empty'}`,
+      );
+
+      const processor = new WorkingMemory({
+        storage: mockStorage,
+        scope: 'thread',
+        template: { format: 'markdown', content: '# Custom' },
+        instructionProvider: {
+          getWorkingMemoryToolInstruction: customGetInstruction,
+        },
+      });
+
+      requestContext.set('MastraMemory', {
+        thread: {
+          id: 'thread-123',
+          resourceId: 'resource-1',
+          title: 'Test',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        resourceId: 'resource-1',
+      });
+      vi.mocked(mockStorage.getThreadById).mockResolvedValue({
+        id: 'thread-123',
+        resourceId: 'resource-1',
+        title: 'Test Thread',
+        metadata: { workingMemory: 'Saved facts' },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const messageList = new MessageList();
+      messageList.add(
+        [
+          {
+            id: 'msg-1',
+            role: 'user',
+            content: { format: 2, parts: [{ type: 'text', text: 'Hello' }] },
+            createdAt: new Date(),
+          },
+        ],
+        'input',
+      );
+
+      const result = await processor.processInput({
+        messages: [],
+        messageList,
+        abort: () => {
+          throw new Error('Aborted');
+        },
+        requestContext,
+      });
+
+      const resultMessages = result instanceof MessageList ? result.get.all.aiV5.prompt() : result;
+      expect(customGetInstruction).toHaveBeenCalledWith({
+        template: { format: 'markdown', content: '# Custom' },
+        data: 'Saved facts',
+      });
+      expect(resultMessages[0].role).toBe('system');
+      expect(resultMessages[0].content).toBe('CUSTOM_TOOL_INSTRUCTION: format=markdown data=Saved facts');
+    });
+
+    it('delegates vNext and readOnly instruction generation to instructionProvider', async () => {
+      const customVNext = vi.fn(() => 'CUSTOM_VNEXT_INSTRUCTION');
+      const customReadOnly = vi.fn(
+        ({ autoUpdated }: { template: WorkingMemoryTemplate; data: string | null; autoUpdated?: boolean }) =>
+          `CUSTOM_READ_ONLY_INSTRUCTION: autoUpdated=${Boolean(autoUpdated)}`,
+      );
+
+      requestContext.set('MastraMemory', {
+        thread: {
+          id: 'thread-123',
+          resourceId: 'resource-1',
+          title: 'Test',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        resourceId: 'resource-1',
+      });
+      vi.mocked(mockStorage.getThreadById).mockResolvedValue({
+        id: 'thread-123',
+        resourceId: 'resource-1',
+        title: 'Test Thread',
+        metadata: { workingMemory: 'Saved facts' },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const vNextProcessor = new WorkingMemory({
+        storage: mockStorage,
+        scope: 'thread',
+        useVNext: true,
+        instructionProvider: {
+          __experimental_getWorkingMemoryToolInstructionVNext: customVNext,
+        },
+      });
+
+      const vNextList = new MessageList();
+      vNextList.add(
+        [
+          {
+            id: 'msg-1',
+            role: 'user',
+            content: { format: 2, parts: [{ type: 'text', text: 'Hello' }] },
+            createdAt: new Date(),
+          },
+        ],
+        'input',
+      );
+      await vNextProcessor.processInput({
+        messages: [],
+        messageList: vNextList,
+        abort: () => {
+          throw new Error('Aborted');
+        },
+        requestContext,
+      });
+      expect(vNextList.get.all.aiV5.prompt()[0].content).toBe('CUSTOM_VNEXT_INSTRUCTION');
+
+      const readOnlyProcessor = new WorkingMemory({
+        storage: mockStorage,
+        scope: 'thread',
+        agentManaged: false,
+        instructionProvider: {
+          getReadOnlyWorkingMemoryInstruction: customReadOnly,
+        },
+      });
+
+      const readOnlyList = new MessageList();
+      readOnlyList.add(
+        [
+          {
+            id: 'msg-1',
+            role: 'user',
+            content: { format: 2, parts: [{ type: 'text', text: 'Hello' }] },
+            createdAt: new Date(),
+          },
+        ],
+        'input',
+      );
+      await readOnlyProcessor.processInput({
+        messages: [],
+        messageList: readOnlyList,
+        abort: () => {
+          throw new Error('Aborted');
+        },
+        requestContext,
+      });
+      expect(readOnlyList.get.all.aiV5.prompt()[0].content).toBe('CUSTOM_READ_ONLY_INSTRUCTION: autoUpdated=true');
+    });
+  });
 });

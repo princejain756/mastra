@@ -11,6 +11,26 @@ export type WorkingMemoryTemplate =
   | { format: 'markdown'; content: string }
   | { format: 'json'; content: string | Record<string, unknown> };
 
+export interface WorkingMemoryInstructionProvider {
+  getWorkingMemoryToolInstruction?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+  }): string | null;
+  getWorkingMemoryToolInstructionVNext?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+  }): string | null;
+  __experimental_getWorkingMemoryToolInstructionVNext?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+  }): string | null;
+  getReadOnlyWorkingMemoryInstruction?(args: {
+    template: WorkingMemoryTemplate;
+    data: string | null;
+    autoUpdated?: boolean;
+  }): string | null;
+}
+
 export interface WorkingMemoryConfig {
   template?: WorkingMemoryTemplate;
   /**
@@ -81,6 +101,7 @@ export class WorkingMemory implements Processor {
       templateProvider?: {
         getWorkingMemoryTemplate(args: { memoryConfig?: MemoryConfigInternal }): Promise<WorkingMemoryTemplate | null>;
       };
+      instructionProvider?: WorkingMemoryInstructionProvider;
       logger?: IMastraLogger;
     },
   ) {
@@ -158,17 +179,31 @@ export class WorkingMemory implements Processor {
       (typeof workingMemoryConfig === 'object' && workingMemoryConfig.agentManaged === false);
 
     // Format working memory instruction
-    let instruction: string;
+    const instructionProvider = this.options.instructionProvider;
+    let instruction: string | null;
     if (isConfiguredReadOnly || isAppManaged) {
-      instruction = this.getReadOnlyWorkingMemoryInstruction({
+      const readOnlyArgs = {
         template,
         data: workingMemoryData,
         autoUpdated: !isConfiguredReadOnly,
-      });
+      };
+      instruction = instructionProvider?.getReadOnlyWorkingMemoryInstruction
+        ? instructionProvider.getReadOnlyWorkingMemoryInstruction(readOnlyArgs)
+        : this.getReadOnlyWorkingMemoryInstruction(readOnlyArgs);
     } else if (this.options.useVNext) {
-      instruction = this.getWorkingMemoryToolInstructionVNext({ template, data: workingMemoryData });
+      const vNextArgs = { template, data: workingMemoryData };
+      if (instructionProvider?.getWorkingMemoryToolInstructionVNext) {
+        instruction = instructionProvider.getWorkingMemoryToolInstructionVNext(vNextArgs);
+      } else if (instructionProvider?.__experimental_getWorkingMemoryToolInstructionVNext) {
+        instruction = instructionProvider.__experimental_getWorkingMemoryToolInstructionVNext(vNextArgs);
+      } else {
+        instruction = this.getWorkingMemoryToolInstructionVNext(vNextArgs);
+      }
     } else {
-      instruction = this.getWorkingMemoryToolInstruction({ template, data: workingMemoryData });
+      const toolArgs = { template, data: workingMemoryData };
+      instruction = instructionProvider?.getWorkingMemoryToolInstruction
+        ? instructionProvider.getWorkingMemoryToolInstruction(toolArgs)
+        : this.getWorkingMemoryToolInstruction(toolArgs);
     }
 
     // If we have a MessageList, add working memory to it with source: 'memory'

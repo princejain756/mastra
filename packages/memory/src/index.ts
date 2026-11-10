@@ -2354,6 +2354,9 @@ Notes:
     template: WorkingMemoryTemplate;
     data: string | null;
   }) {
+    const serializedTemplateContent =
+      typeof template.content === 'string' ? template.content : JSON.stringify(template.content);
+
     return `WORKING_MEMORY_SYSTEM_INSTRUCTION:
 Store and update any conversation-relevant information by calling the updateWorkingMemory tool.
 
@@ -2366,7 +2369,7 @@ Guidelines:
 6. Information not being relevant to the current conversation is not a valid reason to replace or remove working memory information. Your working memory spans across multiple conversations and may be needed again later, even if it's not currently relevant.
 
 <working_memory_template>
-${template.content}
+${serializedTemplateContent}
 </working_memory_template>
 
 <working_memory_data>
@@ -2376,7 +2379,7 @@ ${data || 'No working memory data available.'}
 Notes:
 - Update memory whenever referenced information changes
 ${
-  template.content !== this.defaultWorkingMemoryTemplate
+  serializedTemplateContent !== this.defaultWorkingMemoryTemplate
     ? `- Only store information if it's in the working memory template, do not store other information unless the user asks you to remember it, as that non-template information may be irrelevant`
     : `- If you're unsure whether to store something, store it (eg if the user tells you information about themselves, call updateWorkingMemory immediately to update it)
 `
