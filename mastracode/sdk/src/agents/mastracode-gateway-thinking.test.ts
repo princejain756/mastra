@@ -53,6 +53,7 @@ describe('MastraCodeGateway thinking level forwarding', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     if (prevOpenAIKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = prevOpenAIKey;
   });
@@ -131,6 +132,26 @@ describe('MastraCodeGateway thinking level forwarding', () => {
     });
   });
 
+  it('sends Snowflake Cortex reasoning.effort for both OpenAI and Claude models, clamped to high', async () => {
+    vi.stubEnv('SNOWFLAKE_ACCOUNT', 'test-account');
+    expect((await requestBody(resolve('xhigh', 'snowflake-cortex', 'openai-gpt-5'))).reasoning).toEqual({
+      effort: 'high',
+    });
+    expect((await requestBody(resolve('max', 'snowflake-cortex', 'claude-sonnet-4-5'))).reasoning).toEqual({
+      effort: 'high',
+    });
+    expect((await requestBody(resolve('medium', 'snowflake-cortex', 'claude-opus-4-6'))).reasoning).toEqual({
+      effort: 'medium',
+    });
+  });
+
+  it('leaves Snowflake Cortex non-reasoning models untouched', async () => {
+    vi.stubEnv('SNOWFLAKE_ACCOUNT', 'test-account');
+    const body = await requestBody(resolve('high', 'snowflake-cortex', 'snowflake-llama3.3-70b'));
+    expect(body).not.toHaveProperty('reasoning');
+    expect(body).not.toHaveProperty('reasoning_effort');
+  });
+
   const resolveThroughGateway = (level: ThinkingLevelSetting, providerId: string, modelId: string) =>
     createGateway(level, { routeThroughMastraGateway: true }).resolveLanguageModel({
       providerId,
@@ -163,6 +184,7 @@ describe('MastraCodeGateway thinking level forwarding', () => {
   });
 
   it.each([undefined, 'off'] as const)('leaves every path untouched when thinking is %s', async level => {
+    vi.stubEnv('SNOWFLAKE_ACCOUNT', 'test-account');
     expect(await requestBody(resolve(level, 'my-local', 'local-model'))).not.toHaveProperty('reasoning_effort');
     expect(await requestBody(resolve(level, 'openai', 'gpt-5.5'))).not.toHaveProperty('reasoning');
     const google = await requestBody(resolve(level, 'google', 'gemini-3-flash-preview'));
@@ -173,6 +195,8 @@ describe('MastraCodeGateway thinking level forwarding', () => {
       ['togetherai', 'Qwen/Qwen3.5-9B'],
       ['alibaba', 'qwen-flash'],
       ['openrouter', 'deepseek/deepseek-v4-pro'],
+      ['snowflake-cortex', 'openai-gpt-5'],
+      ['snowflake-cortex', 'claude-sonnet-4-5'],
     ] as const) {
       const body = await requestBody(resolve(level, providerId, modelId));
       for (const thinkingField of ['thinking', 'reasoning_effort', 'reasoning', 'enable_thinking']) {

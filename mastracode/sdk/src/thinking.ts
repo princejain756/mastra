@@ -81,8 +81,14 @@ export function requestableReasoningOptions(
   const format = thinkingRequestFormatFor(modelId);
   if (!format) return isThinkingAdapterProvider(splitProvider(modelId).provider) ? reasoningOptions : [];
   const acceptedEfforts = format.sendEffort ? (format.acceptedEfforts ?? ACTIVE_THINKING_LEVELS) : [];
+  const hasExplicitEffort = reasoningOptions.some(option => option.type === 'effort');
   return reasoningOptions.flatMap((option): ModelReasoningOption[] => {
     if (option.type === 'toggle') return format.enableThinking ? [option] : [];
+    if (option.type === 'budget_tokens') {
+      if (hasExplicitEffort || !format.sendEffort || !format.budgetEfforts?.length) return [];
+      const values = format.budgetEfforts.filter(effort => acceptedEfforts.some(accepted => accepted === effort));
+      return values.length ? [{ type: 'effort', values }] : [];
+    }
     if (option.type !== 'effort') return [];
     const values = option.values.filter(value => acceptedEfforts.some(effort => effort === value));
     return values.length ? [{ type: 'effort', values }] : [];

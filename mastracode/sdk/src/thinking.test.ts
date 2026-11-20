@@ -135,6 +135,19 @@ describe('thinking model capabilities', () => {
       undefined,
       ['off', 'low', 'medium', 'high', 'xhigh', 'max'],
     ],
+    [
+      'Snowflake Cortex OpenAI models offer the efforts the provider accepts',
+      'snowflake-cortex/openai-gpt-5',
+      effort('none', 'minimal', 'low', 'medium', 'high'),
+      ['off', 'low', 'medium', 'high'],
+    ],
+    [
+      'Snowflake Cortex Claude models map budget_tokens capability to supported effort levels',
+      'snowflake-cortex/claude-sonnet-4-5',
+      [{ type: 'budget_tokens' }],
+      ['off', 'low', 'medium', 'high'],
+    ],
+    ['Snowflake Cortex non-reasoning models offer only off', 'snowflake-cortex/snowflake-llama3.3-70b', [], ['off']],
   ])('%s', (_, modelId, reasoningOptions, levels) => {
     expect(getAvailableThinkingLevelsForModel(modelId, reasoningOptions)).toEqual(levels);
   });
@@ -149,6 +162,20 @@ describe('thinking model capabilities', () => {
       'high',
     ],
     ['low on a model with only high', 'openai/gpt-5-pro', 'low', effort('high'), 'high'],
+    [
+      'xhigh on Snowflake Cortex OpenAI',
+      'snowflake-cortex/openai-gpt-5',
+      'xhigh',
+      effort('low', 'medium', 'high'),
+      'high',
+    ],
+    [
+      'max on Snowflake Cortex Claude',
+      'snowflake-cortex/claude-sonnet-4-5',
+      'max',
+      [{ type: 'budget_tokens' }],
+      'high',
+    ],
     ['off anywhere', 'openai/gpt-5-pro', 'off', effort('high'), 'off'],
   ] as const)('runs %s as the closest level the request sends', (_, modelId, level, reasoningOptions, runLevel) => {
     expect(runThinkingLevel(modelId, level, reasoningOptions)).toBe(runLevel);

@@ -8,6 +8,8 @@ export interface ThinkingRequestFormat {
   optionsKey: string;
   sendEffort?: (effort: ActiveThinkingLevel) => ThinkingProviderOptions;
   acceptedEfforts?: readonly ActiveThinkingLevel[];
+  /** Effort levels accepted when a model only advertises `budget_tokens` (mapped server-side). */
+  budgetEfforts?: readonly ActiveThinkingLevel[];
   enableThinking?: ThinkingProviderOptions;
 }
 
@@ -46,6 +48,12 @@ const REQUEST_FORMATS_BY_PROVIDER: Partial<Record<string, ThinkingRequestFormat>
   },
   cerebras: { optionsKey: 'cerebras', sendEffort: sendReasoningEffort },
   perplexity: { optionsKey: 'perplexity', sendEffort: effort => ({ reasoning_effort: effort }) },
+  'snowflake-cortex': {
+    optionsKey: 'snowflake-cortex',
+    sendEffort: effort => ({ reasoning: { effort } }),
+    acceptedEfforts: LOW_TO_HIGH,
+    budgetEfforts: LOW_TO_HIGH,
+  },
 };
 
 const THINKING_ADAPTER_PROVIDERS: ReadonlySet<string> = new Set(['anthropic', 'openai', 'google']);
